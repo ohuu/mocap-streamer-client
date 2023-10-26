@@ -40,7 +40,7 @@
   },
   "packageManager": "yarn@3.6.3",
   "dependencies": {
-    "livekit-client": "^1.13.3",
+    "livekit-client": "^1.14.1",
     "livekit-server-sdk": "^1.2.6"
   }
 }
