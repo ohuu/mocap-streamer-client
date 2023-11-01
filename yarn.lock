@@ -1838,7 +1838,7 @@ __metadata:
     daisyui: ^3.9.4
     electron: ^26.0.0
     electron-builder: ^24.6.3
-    livekit-client: ^1.13.3
+    livekit-client: ^1.14.2
     livekit-server-sdk: ^1.2.6
     oh-vue-icons: ^1.0.0-rc3
     postcss: ^8.4.30
@@ -2862,9 +2862,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"livekit-client@npm:^1.13.3":
-  version: 1.13.3
-  resolution: "livekit-client@npm:1.13.3"
+"livekit-client@npm:^1.14.2":
+  version: 1.14.2
+  resolution: "livekit-client@npm:1.14.2"
   dependencies:
     "@bufbuild/protobuf": ^1.3.0
     events: ^3.3.0
@@ -2873,7 +2873,7 @@ __metadata:
     ts-debounce: ^4.0.0
     typed-emitter: ^2.1.0
     webrtc-adapter: ^8.1.1
-  checksum: 82aad89cd9867cbcdb0a2d68cb593c3a22d1c8d9f87f52de8881eec996791b8a99af8c61b38f05fa20a71f0a0f3e6d88524c53d4776e696aacffc095643e0bed
+  checksum: 25df70dc53a8ba0fe039bb133bb7dcefd71d9d8473e9bf1c3b165be97914b1f54af70e95dbe6b837e589a995e13d8c059bebd8e48df6aa9637d1c1cac7e986bd
   languageName: node
   linkType: hard
 
