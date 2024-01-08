@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from "vue";
-import { DataConnection } from "peerjs";
-import { useRouter } from "vue-router";
-import { store } from "../../store";
-import Modal from "../components/Modal.vue";
 import { ipcRenderer } from "electron";
+import { ref } from "vue";
+import { useRouter } from "vue-router";
+import {
+  ConnectionUpdate,
+  ParticipantsUpdate,
+  PeerStatus,
+} from "../../../shared/types";
+import { store } from "../../store";
 import ConnectionDetailsForm, {
   ConnectionDetails,
 } from "../components/ConnectionDetailsForm.vue";
+import Modal from "../components/Modal.vue";
 
 const router = useRouter();
 
@@ -16,186 +20,101 @@ interface LogMessage {
   text: string;
 }
 
-interface ConnectionStatus {
-  status: "connected" | "disconnected" | "no-response";
-  lastReceived?: number | null;
-  responseTimeoutId?: NodeJS.Timeout | null;
-}
-
-const remoteConnection = reactive<ConnectionStatus>({
-  status: "disconnected",
-  lastReceived: null,
-  responseTimeoutId: null,
-});
-
-const localConnection = reactive<ConnectionStatus>({
-  status: "disconnected",
-});
-
-function prepareConnectionMessage(peerName: string, msg: Buffer): Buffer {
-  const prefix = `${peerName}:`;
-  return Buffer.concat([Buffer.from(prefix, "utf-8"), msg]);
-}
-
-function setUpConnection(conn: DataConnection, alreadyAdded: boolean = false) {
-  const setUpListeners = (conn: DataConnection) => {
-    console.log(conn);
-    if (!alreadyAdded && store.dataConnections != null) {
-      store.dataConnections.push(conn);
-      log.value.push({ type: "info", text: `${conn.peer} has connected.` });
-    }
-    conn.on("close", () => {
-      if (!alreadyAdded && store.dataConnections != null) {
-        log.value.push({
-          type: "info",
-          text: `${conn.peer} has disconnected.`,
-        });
-        store.dataConnections = store.dataConnections.filter(
-          (other) => other.peer !== conn.peer
-        );
-      }
-    });
-
-    conn.on("data", (data): void => {
-      if (localConnection.status !== "disconnected") {
-        const msg = Buffer.from(
-          data as ArrayBuffer,
-          0,
-          (data as ArrayBuffer).byteLength
-        );
-        ipcRenderer.invoke(
-          "udpSendLocal",
-          prepareConnectionMessage(conn.peer, msg)
-        );
-      }
-    });
-  };
-  if (conn.open) {
-    setUpListeners(conn);
-  } else {
-    conn.on("open", () => setUpListeners(conn));
-  }
-}
-
-store.dataConnections?.forEach((connection) =>
-  setUpConnection(connection as DataConnection, true)
-);
-
 const log = ref<LogMessage[]>([]);
 
-function noResponseTimeout() {
-  return setTimeout(() => {
-    remoteConnection.status = "no-response";
-  }, 10000);
-}
+const participants = ref<string[]>([]);
+const localConnectionStatus = ref<ConnectionUpdate["status"]>("disconnected");
+const remoteConnectionStatus = ref<ConnectionUpdate["status"]>("disconnected");
+
+ipcRenderer.on(
+  "participantsUpdate",
+  (_evt, { connections, update }: ParticipantsUpdate) => {
+    participants.value = connections;
+    if (update != null) {
+      log.value.push({
+        type: "info",
+        text: `${update.connection} has ${update.type}`,
+      });
+    }
+  }
+);
+
+ipcRenderer.on(
+  "connectionUpdate",
+  (_evt, { type, status }: ConnectionUpdate) => {
+    if (type === "remote") {
+      log.value.push({
+        type: "info",
+        text:
+          status === "disconnected"
+            ? "Stopped sending data"
+            : status === "timeout"
+            ? "Sending data has been interrupted"
+            : remoteConnectionStatus.value === "disconnected"
+            ? "Started sending data"
+            : "Resumed sending data",
+      });
+      remoteConnectionStatus.value = status;
+    } else {
+      log.value.push({
+        type: "info",
+        text:
+          status === "disconnected"
+            ? "Stopped receiving data"
+            : status === "timeout"
+            ? "Receiving data has been interrupted"
+            : localConnectionStatus.value === "disconnected"
+            ? "Started receiving data"
+            : "Resumed receiving data",
+      });
+      localConnectionStatus.value = status;
+    }
+  }
+);
+
+ipcRenderer.on("peerStatusUpdate", (_evt, { status, message }: PeerStatus) => {
+  switch (status) {
+    case "setupRoom":
+      break;
+    case "connected": {
+      log.value.push({ type: "warn", text: "Connected to the room" });
+      break;
+    }
+    case "disconnected": {
+      log.value.push({ type: "warn", text: "Disconnected from the room" });
+      break;
+    }
+    case "error": {
+      log.value.push({
+        type: "error",
+        text: message ?? "An unknown error has occurred",
+      });
+    }
+  }
+});
 
 function connectUdpRemote({ address, port }: ConnectionDetails) {
-  ipcRenderer
-    .invoke("udpConnectRemote", address, port)
-    .then(() => {
-      log.value.push({ type: "info", text: "Started sending data" });
-      remoteConnection.status = "connected";
-      remoteConnection.lastReceived = Date.now();
-      remoteConnection.responseTimeoutId = noResponseTimeout();
-    })
-    .catch(console.error);
+  ipcRenderer.invoke("udpConnectRemote", address, port).catch(console.error);
 }
 
 function connectUdpLocal({ address, port }: ConnectionDetails) {
-  ipcRenderer.invoke("udpConnectLocal", address, port).then(() => {
-    log.value.push({ type: "info", text: "Started receiving data" });
-    localConnection.status = "connected";
-  });
+  ipcRenderer.invoke("udpConnectLocal", address, port).catch(console.error);
 }
 
-ipcRenderer.on("udpDataReceived", (_evt, buffer: Buffer) => {
-  if (remoteConnection.status !== "disconnected") {
-    store.dataConnections?.forEach((conn) => conn?.send(buffer));
-    if (localConnection.status !== "disconnected" && store.identity != null) {
-      ipcRenderer.invoke(
-        "udpSendLocal",
-        prepareConnectionMessage(store.identity.id, buffer)
-      );
-    }
-    remoteConnection.lastReceived = Date.now();
-    if (remoteConnection.responseTimeoutId != null) {
-      clearTimeout(remoteConnection.responseTimeoutId);
-    }
-    remoteConnection.responseTimeoutId = noResponseTimeout();
-  }
-});
-
 function disconnectUdpRemote() {
-  if (remoteConnection.status !== "disconnected") {
-    remoteConnection.status = "disconnected";
-    ipcRenderer.invoke("udpDisconnectRemote").then(() => {
-      if (remoteConnection.responseTimeoutId != null) {
-        clearTimeout(remoteConnection.responseTimeoutId);
-      }
-      remoteConnection.lastReceived = null;
-      remoteConnection.responseTimeoutId = null;
-      log.value.push({ type: "info", text: "Stopped sending data" });
-    });
-  }
+  ipcRenderer.invoke("udpDisconnectRemote").catch(console.error);
 }
 
 function disconnectUdpLocal() {
-  if (localConnection.status !== "disconnected") {
-    localConnection.status = "disconnected";
-    ipcRenderer
-      .invoke("udpDisconnectLocal")
-      .then(() =>
-        log.value.push({ type: "info", text: "Stopped receiving data" })
-      );
-  }
-}
-
-const peerInterval = setInterval(() => {
-  store.identity?.listAllPeers((peers: string[]) => {
-    if (store.dataConnections != null) {
-      for (const peer of peers.filter(
-        (peer) =>
-          store.dataConnections!.find((conn) => peer === conn.peer) == null
-      )) {
-        setUpConnection(store.identity!.connect(peer, { reliable: false }));
-      }
-
-      for (const conn of store.dataConnections.filter(
-        (conn) => !peers.includes(conn.peer)
-      )) {
-        conn.close();
-      }
-    }
-  });
-}, 10000);
-
-function disconnectSelf() {
-  clearInterval(peerInterval);
-  store.dataConnections?.forEach((conn) => conn.close());
-  store.identity?.disconnect();
-  store.dataConnections = undefined;
+  ipcRenderer.invoke("udpDisconnectLocal").catch(console.error);
 }
 
 function disconnectAll() {
-  if (store.clientType === "Sender" || store.clientType === "Both") {
-    disconnectUdpRemote();
-  }
-  if (store.clientType === "Receiver" || store.clientType === "Both") {
-    disconnectUdpLocal();
-  }
-  disconnectSelf();
+  ipcRenderer
+    .invoke("disconnectAll")
+    .then(() => router.push("/"))
+    .catch(console.error);
 }
-
-watch(
-  () => store.dataConnections,
-  (dataConnections) => {
-    if (dataConnections == null) {
-      router.push("/");
-    }
-  }
-);
-
-store.identity?.on("connection", setUpConnection);
 </script>
 
 <template>
@@ -211,8 +130,8 @@ store.identity?.on("connection", setUpConnection);
       </div>
       <h2>
         Connected as
-        <span class="border-b border-slate-400" v-text="store.identity?.id" />
-        To room
+        <span class="border-b border-slate-400" v-text="store.peerName" />
+        to room
         <span class="border-b border-slate-400" v-text="store.roomName" />
       </h2>
     </nav>
@@ -238,16 +157,14 @@ store.identity?.on("connection", setUpConnection);
       <div class="border-l-2 border-slate-400 px-4 w-[70%]">
         <h3 class="py-2 border-b border-inherit">Connected Participants</h3>
         <ul>
-          <li v-for="conn in store.dataConnections" :key="conn.peer">
-            {{ conn.peer }}
-          </li>
+          <li v-for="peer in participants" :key="peer" v-text="peer" />
         </ul>
       </div>
     </div>
     <div :class="store.clientType === 'Both' ? 'grid grid-cols-2 gap-2' : ''">
       <div v-if="store.clientType === 'Sender' || store.clientType === 'Both'">
         <ConnectionDetailsForm
-          v-if="remoteConnection.status === 'disconnected'"
+          v-if="remoteConnectionStatus === 'disconnected'"
           :initial="{ address: '127.0.0.1', port: 7004 }"
           submit-label="Start Sending"
           @submit="connectUdpRemote"
@@ -259,7 +176,7 @@ store.identity?.on("connection", setUpConnection);
           >
             Stop Sending
           </button>
-          <span v-if="remoteConnection.status === 'connected'">Connected</span>
+          <span v-if="remoteConnectionStatus === 'connected'">Connected</span>
           <span v-else>No response</span>
         </div>
       </div>
@@ -267,7 +184,7 @@ store.identity?.on("connection", setUpConnection);
         v-if="store.clientType === 'Receiver' || store.clientType === 'Both'"
       >
         <ConnectionDetailsForm
-          v-if="localConnection.status === 'disconnected'"
+          v-if="localConnectionStatus === 'disconnected'"
           :initial="{ address: '127.0.0.1', port: 7000 }"
           submit-label="Start Receiving"
           @submit="connectUdpLocal"
@@ -279,7 +196,8 @@ store.identity?.on("connection", setUpConnection);
           >
             Stop Receiving
           </button>
-          <span>Connected</span>
+          <span v-if="localConnectionStatus === 'connected'">Connected</span>
+          <span v-else>Timed out</span>
         </div>
       </div>
     </div>

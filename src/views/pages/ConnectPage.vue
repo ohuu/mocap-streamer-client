@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import Peer from "peerjs";
 import { computed, ref } from "vue";
 import { store } from "../../store";
 import { useRouter } from "vue-router";
 import Modal from "../components/Modal.vue";
 import { ErrorMessage, Field, Form } from "vee-validate";
 import * as yup from "yup";
+import { PeerStatus } from "../../../shared/types";
+import { ipcRenderer } from "electron";
 
 const router = useRouter();
 
@@ -14,7 +15,7 @@ const connectError = ref<unknown>(null);
 
 const schema = computed(() =>
   yup.object({
-    clientName: yup
+    peerName: yup
       .string()
       .trim()
       .required("You must provide a name for yourself"),
@@ -30,51 +31,42 @@ const schema = computed(() =>
   })
 );
 
+ipcRenderer.on("peerStatusUpdate", (_evt, peerStatus: PeerStatus) => {
+  switch (peerStatus.status) {
+    case "error": {
+      connecting.value = false;
+      connectError.value = peerStatus.message;
+      break;
+    }
+    case "setupRoom": {
+      ipcRenderer.invoke(
+        "peerCreate",
+        store.peerName,
+        store.roomName,
+        store.connectionServer
+      );
+      break;
+    }
+    case "connected": {
+      connecting.value = false;
+      connectError.value = null;
+      router.push("/dashboard");
+      break;
+    }
+  }
+});
+
 const connectToRoom = async (args: any) => {
   connecting.value = true;
 
-  try {
-    await fetch(
-      `http${args.https ? "s" : ""}://${args.host}:${args.port}/setup-room/${
-        args.roomName
-      }`,
-      { method: "POST" }
-    );
-  } catch (err) {
-    connectError.value = `Something went wrong setting up the room: ${err}`;
-    connecting.value = false;
-    return;
-  }
-
   store.clientType = args.clientType;
+  store.roomName = args.roomName;
+  store.peerName = args.peerName;
   store.connectionServer.https = args.https;
   store.connectionServer.host = args.host;
   store.connectionServer.port = args.port;
 
-  const peer = new Peer(args.clientName, {
-    host: args.host,
-    port: args.port,
-    path: `/room/${args.roomName}`,
-  });
-
-  store.identity = peer;
-
-  peer.on("open", () =>
-    peer.listAllPeers((peers) => {
-      connecting.value = false;
-      connectError.value = null;
-
-      store.dataConnections = peers.map((id) =>
-        peer.connect(id, { reliable: false })
-      );
-      store.roomName = args.roomName;
-      router.push("/dashboard");
-    })
-  );
-  peer.on("error", (err) => {
-    connecting.value = false;
-    connectError.value = err.message;
-  });
+  ipcRenderer.invoke("peerSetupRoom", store.roomName, store.connectionServer);
 };
 </script>
 
@@ -97,9 +89,9 @@ const connectToRoom = async (args: any) => {
       >
         <label>
           <span>Participant Name</span>
-          <Field class="input input-bordered w-full mb-2" name="clientName" />
+          <Field class="input input-bordered w-full mb-2" name="peerName" />
         </label>
-        <ErrorMessage class="block text-error text-sm" name="clientName" />
+        <ErrorMessage class="block text-error text-sm" name="peerName" />
 
         <label>
           <span>Room Name</span>
