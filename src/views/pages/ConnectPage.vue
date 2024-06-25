@@ -50,13 +50,9 @@ const connectToRoom = async (args: any) => {
   store.connectionServer.host = args.host;
   store.connectionServer.port = args.port;
 
-  const response = await fetch("https://global.xirsys.net/_turn/MyFirstApp", {
-    method: "PUT",
-    body: { format: "urls" },
-    headers: {
-      Authorization: `Basic ${btoa()}`,
-    },
-  });
+  const response = await fetch(
+    "https://mocap-streamer-turn.metered.live/api/v1/turn/credentials?apiKey=bac148aca951c64efb1234b3c0b319f240c8"
+  );
 
   const iceServers = await response.json();
 
