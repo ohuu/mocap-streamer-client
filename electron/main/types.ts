@@ -64,7 +64,7 @@ export const transformOrder = [
 ] as const;
 
 export const viconTransformMap: Record<
-  typeof transformOrder extends Array<infer S> ? S : never,
+  typeof transformOrder extends ReadonlyArray<infer S> ? S : never,
   string
 > = {
   Hips: "Hips",
@@ -126,7 +126,7 @@ export const viconTransformMap: Record<
   LeftUpLeg: "LeftUpLeg",
   LeftLeg: "LeftLeg",
   LeftFoot: "LeftFoot",
-} as const;
+};
 
 export const dataOrder = [
   "posx",
@@ -137,10 +137,7 @@ export const dataOrder = [
   "rotz",
 ] as const;
 
-export type SegmentData = Record<
-  typeof dataOrder extends ReadonlyArray<infer S> ? S : never,
-  number
->;
+export type SegmentData = Record<(typeof dataOrder)[number], number>;
 
 export interface SubjectData {
   name: string;

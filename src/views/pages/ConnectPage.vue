@@ -33,13 +33,22 @@ const schema = computed(() =>
 const connectToRoom = async (args: any) => {
   connecting.value = true;
 
+  let resp: Response;
+
   try {
-    await fetch(`${connectionServerBaseUrl()}/setup-room/${args.roomName}`, {
-      method: "POST",
-      mode: "no-cors",
-    });
+    resp = await fetch(
+      `${connectionServerBaseUrl()}/setup-room/${args.roomName}`,
+      { method: "POST", mode: "cors" }
+    );
   } catch (err) {
     connectError.value = `Something went wrong setting up the room: ${err}`;
+    connecting.value = false;
+    return;
+  }
+
+  if (resp.status < 200 || resp.status >= 300) {
+    const message = await resp.text();
+    connectError.value = `Received an error from the server: ${message}`;
     connecting.value = false;
     return;
   }

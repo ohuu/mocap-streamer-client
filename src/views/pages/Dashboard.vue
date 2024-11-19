@@ -1,19 +1,37 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from "vue";
-import { DataConnection } from "peerjs";
-import { useRouter } from "vue-router";
-import { connectionServerBaseUrl, store } from "../../store";
-import Modal from "../components/Modal.vue";
 import { ipcRenderer } from "electron";
+import { DataConnection } from "peerjs";
+import { Skeleton } from "three";
+import { reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import {
+  bufferToBvh,
+  bvhToOsc,
+  bvhToSubjectData,
+  subjectDataToBvh,
+} from "../../conversion";
+import { loadSkeleton, standardiseAnimation } from "../../services/retarget";
+import { connectionServerBaseUrl, store } from "../../store";
+import { SubjectData, transformOrder } from "../../types";
+import { bvhToParts } from "../../utils";
 import ConsumerConnectionDetailsForm, {
   ConsumerConnectionDetails,
 } from "../components/ConsumerConnectionDetailsForm.vue";
+import Modal from "../components/Modal.vue";
 import ProducerConnectionDetailsForm, {
   ProducerConnectionDetails,
 } from "../components/ProducerConnectionDetailsForm.vue";
-import { bufferToBvh, bvhToOsc } from "../../conversion";
 
 const router = useRouter();
+
+/*
+
+Look into connection problems with people being duplicated in server lists
+Potential server instability
+Maybe scaling issue with vicon data? In the conversion of radians to degrees?
+If you're in a room, you don't get a connection joined message for a new australian connection
+
+*/
 
 interface LogMessage {
   type?: "info" | "error" | "warn";
@@ -26,6 +44,13 @@ interface ConnectionStatus<I> {
   responseTimeoutId?: NodeJS.Timeout | null;
   initial: I;
 }
+
+const registeredSkeletons = reactive<{
+  default: Skeleton | null;
+  others: Record<string, Skeleton>;
+}>({ default: null, others: {} });
+
+const prevFrames = reactive<Record<string, SubjectData>>({});
 
 const producerConnection = reactive<
   ConnectionStatus<ProducerConnectionDetails>
@@ -115,9 +140,31 @@ function connectConsumer(details: ConsumerConnectionDetails) {
 
 ipcRenderer.on("producerDataReceived", (_evt, buffer: Buffer) => {
   if (producerConnection.status !== "disconnected") {
-    const oscData = bvhToOsc(bufferToBvh(buffer), {
-      addressPrefix: store.identity?.id ?? "anonymous",
-    });
+    const bvh = bufferToBvh(buffer);
+    const bvhParts = bvhToParts(bvh);
+    const skeleton =
+      (bvhParts?.name != null
+        ? registeredSkeletons.others[bvhParts.name]
+        : null) ?? registeredSkeletons.default;
+    const subjectData = bvhToSubjectData(
+      bvh,
+      skeleton?.bones.map(({ name }) => name) ?? transformOrder
+    );
+    const oscData = bvhToOsc(
+      skeleton != null
+        ? subjectDataToBvh(
+            standardiseAnimation(
+              skeleton,
+              subjectData,
+              bvhParts?.name != null ? prevFrames[bvhParts.name] : null
+            )
+          )
+        : bvh,
+      { addressPrefix: store.identity?.id ?? "anonymous" }
+    );
+    if (bvhParts != null) {
+      prevFrames[bvhParts.name] = subjectData;
+    }
     store.dataConnections?.forEach((conn) => conn?.send(oscData));
     if (consumerConnection.status !== "disconnected") {
       ipcRenderer.invoke("sendConsumer", oscData);
@@ -180,6 +227,16 @@ function syncConnections() {
         }
       }
     });
+}
+
+function registerSkeleton(path: string, name?: string | null): void {
+  loadSkeleton(path).then((skeleton) => {
+    if (name != null) {
+      registeredSkeletons.others[name] = skeleton;
+    } else {
+      registeredSkeletons.default = skeleton;
+    }
+  });
 }
 
 let peerInterval: NodeJS.Timeout;

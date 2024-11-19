@@ -9,7 +9,7 @@
   directories: {
     output: "release/${version}",
   },
-  extraFiles: ["assets", "C"],
+  extraFiles: ["assets"],
   files: ["dist", "dist-electron"],
   mac: {
     target: ["dmg"],
