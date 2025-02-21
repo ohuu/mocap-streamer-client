@@ -15,16 +15,16 @@ export interface Store {
 
 export const store = reactive<Store>({
   clientType: "Both",
-  // connectionServer: {
-  //   https: true,
-  //   host: "seashell-app-u7jay.ondigitalocean.app",
-  //   port: 443,
-  // },
   connectionServer: {
-    https: false,
-    host: "localhost",
-    port: 8000,
+    https: true,
+    host: "seashell-app-u7jay.ondigitalocean.app",
+    port: 443,
   },
+  // connectionServer: {
+  //   https: false,
+  //   host: "localhost",
+  //   port: 8000,
+  // },
 });
 
 export function connectionServerBaseUrl(): string {

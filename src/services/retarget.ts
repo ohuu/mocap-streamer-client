@@ -121,9 +121,10 @@ export function loadSkeleton(path: string): Promise<Skeleton> {
     } else {
       rej(
         new Error(
-          `No suitable 3D model loader found for "${path}". Accepted extensions are: "${loaders
+          `No suitable 3D model loader found for "${path}". Accepted extensions are: ${loaders
             .flatMap(({ exts }) => exts)
-            .join('", "')}"`
+            .map((ext) => `"${ext}"`)
+            .join(", ")}`
         )
       );
     }
